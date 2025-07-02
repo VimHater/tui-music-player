@@ -1,3 +1,6 @@
 [submodule "FTXUI"]
 	path = FTXUI
 	url = https://github.com/ArthurSonzogni/FTXUI.git
+[submodule "cava"]
+	path = src/cava
+	url = https://github.com/karlstav/cava.git

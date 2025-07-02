@@ -6,12 +6,13 @@ FetchContent_Declare(ftxui
     GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI
     GIT_TAG v6.1.9  # Replace with a version, tag, or commit hash
 )
-FetchContent_Declare(SDL2
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG release-2.30.3  # or latest stable
+FetchContent_MakeAvailable(ftxui)
+
+include_directories(
+    ${PROJECT_SOURCE_DIR}/cava
 )
 
-FetchContent_MakeAvailable(ftxui)
+set(DCMAKE_EXPORT_COMPILE_COMMANDS=1)
 
 add_executable(
     ${PROJECT_NAME}
@@ -24,5 +25,6 @@ target_link_libraries(
     PRIVATE ftxui::screen
     PRIVATE ftxui::dom
     PRIVATE ftxui::component
+    PRIVATE ${PROJECT_SOURCE_DIR}/cava/cavacore.c
 )
 

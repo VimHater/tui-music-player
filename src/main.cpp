@@ -11,9 +11,9 @@
 #include <iostream>
 #include <sstream>
 #include <thread>
-
 #include "miniaudio.h"
 
+// Global
 std::atomic<bool> g_paused(false);
 std::atomic<bool> g_quit_app(false);
 std::atomic<double> g_current_progress(0.0);
@@ -21,13 +21,15 @@ std::atomic<bool> g_audio_finished(false);
 
 void audio_playback_thread_logic(const char* filepath) {
     ma_engine engine;
+    ma_sound song;
+    ma_uint64 total_length_in_pcm_frames;
+
+    // Check audio error
     if (ma_engine_init(nullptr, &engine) != MA_SUCCESS) {
         std::cerr << "Audio: miniaudio error\n";
         g_audio_finished = true;
         return;
     }
-
-    ma_sound song;
     if (ma_sound_init_from_file(&engine, filepath, MA_SOUND_FLAG_STREAM,
                                 nullptr, nullptr, &song) != MA_SUCCESS) {
         std::cerr << "Audio: no such file" << filepath << "\n";
@@ -35,7 +37,6 @@ void audio_playback_thread_logic(const char* filepath) {
         g_audio_finished = true;
         return;
     }
-
     if (ma_sound_start(&song) != MA_SUCCESS) {
         std::cerr << "Audio thread: cant start sound\n";
         ma_sound_uninit(&song);
@@ -43,8 +44,6 @@ void audio_playback_thread_logic(const char* filepath) {
         g_audio_finished = true;
         return;
     }
-
-    ma_uint64 total_length_in_pcm_frames;
     if (ma_sound_get_length_in_pcm_frames(&song, &total_length_in_pcm_frames) !=
         MA_SUCCESS) {
         std::cerr << "Audio thread failed\n";
@@ -74,8 +73,6 @@ void audio_playback_thread_logic(const char* filepath) {
                         total_length_in_pcm_frames - 100) {
                         g_audio_finished = true;
                         g_current_progress = 100.0;
-                        std::cout << "Audio thread exit (natural completion "
-                                     "detected on resume attempt).\n";
                         break;
                     }
                 }
@@ -138,10 +135,12 @@ int main(int argc, char* argv[]) {
         }
     });
 
+    // Container must be declare for interactive component
     auto main_container = ftxui::Container::Vertical({
         pauseButton,
     });
 
+    // Who decided to make the entire UI lib pure functional T_T
     auto renderer = ftxui::Renderer(main_container, [&]() -> ftxui::Element {
         double current_p = g_current_progress.load();
         std::stringstream ss;
@@ -179,8 +178,8 @@ int main(int argc, char* argv[]) {
                ftxui::border;
     });
 
+    // TODO: Threading
     std::thread audio_thread(audio_playback_thread_logic, audio_file_path);
-
     std::thread ui_update_thread([&] {
         while (!g_quit_app) {
             screen.PostEvent(ftxui::Event::Custom);
@@ -189,10 +188,12 @@ int main(int argc, char* argv[]) {
         std::cout << "UI exit.\n";
     });
 
+    // TODO: Render
     screen.Loop(renderer);
 
     g_quit_app = true;
 
+    // TODO: Join thread
     if (audio_thread.joinable()) {
         audio_thread.join();
     }
