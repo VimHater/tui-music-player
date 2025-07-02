@@ -4,3 +4,9 @@
 [submodule "cava"]
 	path = src/cava
 	url = https://github.com/karlstav/cava.git
+[submodule "src/cava"]
+	path = src/cava
+	url = https://github.com/karlstav/cava.git
+[submodule "src/miniaudio"]
+	path = src/miniaudio
+	url = https://github.com/mackron/miniaudio.git
