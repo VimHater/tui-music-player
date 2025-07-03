@@ -17,7 +17,6 @@ add_executable(
     ${PROJECT_NAME}
     src/main.cpp
     src/miniaudio/miniaudio.c
-    src/cava/cavacore.c
 )
 
 target_link_libraries(
