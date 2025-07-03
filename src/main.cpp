@@ -13,6 +13,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+
 #include "cava/cavacore.h"
 #include "miniaudio/miniaudio.h"
 
@@ -27,11 +28,7 @@ std::atomic<bool> g_skip_next(false);
 std::atomic<bool> g_skip_prev(false);
 std::atomic<int> g_current_track_index(0);
 
-
 std::vector<std::string> g_playlist;
-
-
-
 
 void audio_playback_thread_logic() {
     ma_engine engine;
@@ -104,8 +101,6 @@ void audio_playback_thread_logic() {
             if (seek_result != MA_SUCCESS) {
                 std::cerr << "Faile to start: "
                           << ma_result_description(seek_result) << "\n";
-            } else {
-                std::cout << "New track loaded and reset\n";
             }
             g_current_progress = 0.0;
         }
@@ -149,7 +144,6 @@ void audio_playback_thread_logic() {
                         &song, &cursor_in_pcm_frames) == MA_SUCCESS) {
                     if (cursor_in_pcm_frames >=
                         total_length_in_pcm_frames - 100) {
-                        // Song finished, move to next track
                         ma_sound_stop(&song);
                         ma_sound_uninit(&song);
                         song_loaded = false;
@@ -166,7 +160,7 @@ void audio_playback_thread_logic() {
                 }
             }
 
-            // Update progress
+            // Update
             if (ma_sound_is_playing(&song)) {
                 ma_uint64 cursor_in_pcm_frames;
                 if (ma_sound_get_cursor_in_pcm_frames(
@@ -219,14 +213,14 @@ void play_playlist(const std::vector<std::string>& playlist) {
             g_paused = !g_paused;
         }
     });
-    auto prev_button = ftxui::Button("<<", [&] {
+    auto prev_button = ftxui::Button(" << ", [&] {
         g_skip_prev = true;
         g_paused = false;
         ui_slider_value = 0.0f;
         g_current_progress = 0.0;
         g_seek_requested = false;
     });
-    auto next_button = ftxui::Button(">>", [&] {
+    auto next_button = ftxui::Button(" >> ", [&] {
         g_skip_next = true;
         g_paused = false;
         ui_slider_value = 0.0f;
@@ -294,10 +288,10 @@ void play_playlist(const std::vector<std::string>& playlist) {
                    ftxui::hbox({
                        ftxui::text(track_info) |
                            ftxui::color(ftxui::Color::Blue),
-                       ftxui::text("Progress: "),
-                       ftxui::text(progress_display_text) | ftxui::xflex |
-                           ftxui::align_right |
-                           ftxui::color(ftxui::Color::Green),
+                       ftxui::hbox({
+                           ftxui::text("Progress: "),
+                           ftxui::text(progress_display_text) | ftxui::color(ftxui::Color::Green),
+                       }) | ftxui::align_right | ftxui::flex,
                    }),
                    ftxui::separator(),
                    ftxui::hbox({
@@ -305,18 +299,17 @@ void play_playlist(const std::vector<std::string>& playlist) {
                    }),
                    ftxui::separator(),
                    ftxui::hbox({
-                       prev_button->Render() | ftxui::center,
+                       prev_button->Render() | ftxui::center | ftxui::flex,
                        ftxui::text(" "),
-                       pause_button->Render() | ftxui::center,
+                       pause_button->Render() | ftxui::flex,
                        ftxui::text(" "),
-                       next_button->Render() | ftxui::center,
+                       next_button->Render() | ftxui::flex,
                    }) | ftxui::center,
                    ftxui::separator(),
-                   ftxui::text("Controls: Space=Play/Pause, ←=Previous, "
-                               "→=Next, ↑↓=Seek") |
+                   ftxui::text("Controls: Space:Play/Pause, ←:Previous, "
+                               "→:Next, ↑↓ Seek") |
                        ftxui::dim | ftxui::center,
-               }) |
-               ftxui::border;
+               }) | ftxui::border;
     });
 
     // Keyboard
@@ -328,10 +321,18 @@ void play_playlist(const std::vector<std::string>& playlist) {
             }
             if (event == ftxui::Event::ArrowLeft) {
                 g_skip_prev = true;
+                g_paused = false;
+                ui_slider_value = 0.0f;
+                g_current_progress = 0.0;
+                g_seek_requested = false;
                 return true;
             }
             if (event == ftxui::Event::ArrowRight) {
                 g_skip_next = true;
+                g_paused = false;
+                ui_slider_value = 0.0f;
+                g_current_progress = 0.0;
+                g_seek_requested = false;
                 return true;
             }
             if (event == ftxui::Event::ArrowUp) {
@@ -392,5 +393,4 @@ int main(int argc, char** argv) {
     std::cout << "\n";
 
     play_playlist(playlist);
-    return 0;
 }
