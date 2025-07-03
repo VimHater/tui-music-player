@@ -14,7 +14,6 @@
 #include <thread>
 #include <vector>
 
-#include "cava/cavacore.h"
 #include "miniaudio/miniaudio.h"
 
 // Global
