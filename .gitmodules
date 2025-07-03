@@ -10,3 +10,6 @@
 [submodule "src/miniaudio"]
 	path = src/miniaudio
 	url = https://github.com/mackron/miniaudio.git
+[submodule "vcpkg"]
+	path = vcpkg
+	url = https://github.com/microsoft/vcpkg.git

@@ -9,7 +9,9 @@ FetchContent_Declare(ftxui
 FetchContent_MakeAvailable(ftxui)
 
 
-set(DCMAKE_EXPORT_COMPILE_COMMANDS=1)
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake")
+
+set(DCMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(FFTW3 REQUIRED)
 add_executable(
     ${PROJECT_NAME}
@@ -23,7 +25,6 @@ target_link_libraries(
     PRIVATE ftxui::screen
     PRIVATE ftxui::dom
     PRIVATE ftxui::component
-    PRIVATE
-        ${FFTW3_LIBRARIES}
+    PRIVATE ${FFTW3_LIBRARIES}
 )
 
