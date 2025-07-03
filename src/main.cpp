@@ -10,55 +10,133 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <thread>
-#include "miniaudio.h"
+#include <vector>
+#include "cava/cavacore.h"
+#include "miniaudio/miniaudio.h"
 
 // Global
 std::atomic<bool> g_paused(false);
 std::atomic<bool> g_quit_app(false);
 std::atomic<double> g_current_progress(0.0);
 std::atomic<bool> g_audio_finished(false);
+std::atomic<bool> g_seek_requested(false);
+std::atomic<double> g_seek_position_percent(0.0);
+std::atomic<bool> g_skip_next(false);
+std::atomic<bool> g_skip_prev(false);
+std::atomic<int> g_current_track_index(0);
 
-void audio_playback_thread_logic(const char* filepath) {
+
+std::vector<std::string> g_playlist;
+
+
+
+
+void audio_playback_thread_logic() {
     ma_engine engine;
     ma_sound song;
     ma_uint64 total_length_in_pcm_frames;
+    bool song_loaded = false;
 
-    // Check audio error
+    // Init audio engine
     if (ma_engine_init(nullptr, &engine) != MA_SUCCESS) {
         std::cerr << "Audio: miniaudio error\n";
         g_audio_finished = true;
         return;
     }
-    if (ma_sound_init_from_file(&engine, filepath, MA_SOUND_FLAG_STREAM,
-                                nullptr, nullptr, &song) != MA_SUCCESS) {
-        std::cerr << "Audio: no such file" << filepath << "\n";
-        ma_engine_uninit(&engine);
-        g_audio_finished = true;
-        return;
-    }
-    if (ma_sound_start(&song) != MA_SUCCESS) {
-        std::cerr << "Audio thread: cant start sound\n";
-        ma_sound_uninit(&song);
-        ma_engine_uninit(&engine);
-        g_audio_finished = true;
-        return;
-    }
-    if (ma_sound_get_length_in_pcm_frames(&song, &total_length_in_pcm_frames) !=
-        MA_SUCCESS) {
-        std::cerr << "Audio thread failed\n";
-        ma_sound_stop(&song);
-        ma_sound_uninit(&song);
-        ma_engine_uninit(&engine);
-        g_audio_finished = true;
-        return;
-    }
 
-    ma_uint32 sample_rate = ma_engine_get_sample_rate(&engine);
-    double total_duration_seconds =
-        static_cast<double>(total_length_in_pcm_frames) / sample_rate;
+    while (!g_quit_app) {
+        int current_index = g_current_track_index.load();
 
-    while (!g_quit_app && !g_audio_finished) {
+        if (g_skip_next.load()) {
+            if (song_loaded) {
+                ma_sound_stop(&song);
+                ma_sound_uninit(&song);
+                song_loaded = false;
+            }
+            current_index = (current_index + 1) % g_playlist.size();
+            g_current_track_index = current_index;
+            g_current_progress = 0.0;
+            g_skip_next = false;
+        }
+
+        if (g_skip_prev.load()) {
+            if (song_loaded) {
+                ma_sound_stop(&song);
+                ma_sound_uninit(&song);
+                song_loaded = false;
+            }
+            current_index =
+                (current_index - 1 + g_playlist.size()) % g_playlist.size();
+            g_current_track_index = current_index;
+            g_current_progress = 0.0;
+            g_skip_prev = false;
+        }
+
+        // Load new song if needed
+        if (!song_loaded && current_index < g_playlist.size()) {
+            const char* filepath = g_playlist[current_index].c_str();
+
+            if (ma_sound_init_from_file(&engine, filepath, MA_SOUND_FLAG_STREAM,
+                                        nullptr, nullptr,
+                                        &song) != MA_SUCCESS) {
+                std::cerr << "Audio: no such file " << filepath << "\n";
+                // Skip to next track if current one fails
+                current_index = (current_index + 1) % g_playlist.size();
+                g_current_track_index = current_index;
+                continue;
+            }
+
+            if (ma_sound_get_length_in_pcm_frames(
+                    &song, &total_length_in_pcm_frames) != MA_SUCCESS) {
+                std::cerr << "Audio thread failed to get length\n";
+                ma_sound_uninit(&song);
+                current_index = (current_index + 1) % g_playlist.size();
+                g_current_track_index = current_index;
+                continue;
+            }
+
+            song_loaded = true;
+            g_audio_finished = false;
+
+            ma_result seek_result = ma_sound_seek_to_pcm_frame(&song, 0);
+            if (seek_result != MA_SUCCESS) {
+                std::cerr << "Faile to start: "
+                          << ma_result_description(seek_result) << "\n";
+            } else {
+                std::cout << "New track loaded and reset\n";
+            }
+            g_current_progress = 0.0;
+        }
+
+        if (!song_loaded) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
+        ma_uint32 sample_rate = ma_engine_get_sample_rate(&engine);
+        double total_duration_seconds =
+            static_cast<double>(total_length_in_pcm_frames) / sample_rate;
+
+        // Seek
+        if (g_seek_requested.load()) {
+            double target_percent = g_seek_position_percent.load();
+            ma_uint64 seek_frame = static_cast<ma_uint64>(
+                (target_percent / 100.0) * total_length_in_pcm_frames);
+
+            ma_result seek_result =
+                ma_sound_seek_to_pcm_frame(&song, seek_frame);
+            if (seek_result == MA_SUCCESS) {
+                g_current_progress = target_percent;
+            } else {
+                std::cerr << "Audio Thread: Failed to seek: "
+                          << ma_result_description(seek_result) << "\n";
+            }
+            g_seek_requested = false;
+        }
+
+        // Pause/play
         if (g_paused) {
             if (ma_sound_is_playing(&song)) {
                 ma_sound_stop(&song);
@@ -71,21 +149,24 @@ void audio_playback_thread_logic(const char* filepath) {
                         &song, &cursor_in_pcm_frames) == MA_SUCCESS) {
                     if (cursor_in_pcm_frames >=
                         total_length_in_pcm_frames - 100) {
-                        g_audio_finished = true;
-                        g_current_progress = 100.0;
-                        break;
+                        // Song finished, move to next track
+                        ma_sound_stop(&song);
+                        ma_sound_uninit(&song);
+                        song_loaded = false;
+                        current_index = (current_index + 1) % g_playlist.size();
+                        g_current_track_index = current_index;
+                        g_current_progress = 0.0;
+                        continue;
                     }
                 }
 
-                if (!g_audio_finished) {
-                    if (ma_sound_start(&song) != MA_SUCCESS) {
-                        std::cerr << "Audio thread: Failed to resume sound\n";
-                        g_audio_finished = true;
-                        break;
-                    }
+                if (ma_sound_start(&song) != MA_SUCCESS) {
+                    std::cerr << "Audio thread: Failed to resume sound\n";
+                    break;
                 }
             }
 
+            // Update progress
             if (ma_sound_is_playing(&song)) {
                 ma_uint64 cursor_in_pcm_frames;
                 if (ma_sound_get_cursor_in_pcm_frames(
@@ -99,87 +180,177 @@ void audio_playback_thread_logic(const char* filepath) {
                 }
             }
         }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
-    if (ma_sound_is_playing(&song)) {
-        ma_sound_stop(&song);
+    // Cleanup
+    if (song_loaded) {
+        if (ma_sound_is_playing(&song)) {
+            ma_sound_stop(&song);
+        }
+        ma_sound_uninit(&song);
     }
-    ma_sound_uninit(&song);
     ma_engine_uninit(&engine);
-
-    if (!g_quit_app && !g_audio_finished) {
-        g_audio_finished = true;
-        g_current_progress = 100.0;
-    }
 
     std::cout << "Audio exit\n";
 }
 
-int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <audio_file_path>\n";
-        return 1;
+std::string get_filename_from_path(const std::string& path) {
+    size_t last_slash = path.find_last_of("/\\");
+    if (last_slash != std::string::npos) {
+        return path.substr(last_slash + 1);
     }
-    const char* audio_file_path = argv[1];
+    return path;
+}
+
+void play_playlist(const std::vector<std::string>& playlist) {
+    g_playlist = playlist;
+    g_current_track_index = 0;
 
     auto screen = ftxui::ScreenInteractive::TerminalOutput();
-
     std::string progress_display_text = "0.00%";
-    std::string buttonLable = "Pause";
+    std::string button_label = "Pause";
+    float ui_slider_value = 0.0;
 
-    auto pauseButton = ftxui::Button(&buttonLable, [&] {
+    // UI
+    auto pause_button = ftxui::Button(&button_label, [&] {
         if (!g_audio_finished) {
             g_paused = !g_paused;
-            screen.PostEvent(ftxui::Event::Custom);
         }
     });
+    auto prev_button = ftxui::Button("<<", [&] {
+        g_skip_prev = true;
+        g_paused = false;
+        ui_slider_value = 0.0f;
+        g_current_progress = 0.0;
+        g_seek_requested = false;
+    });
+    auto next_button = ftxui::Button(">>", [&] {
+        g_skip_next = true;
+        g_paused = false;
+        ui_slider_value = 0.0f;
+        g_current_progress = 0.0;
+        g_seek_requested = false;
+    });
+    auto process_slider = ftxui::Slider("", &ui_slider_value, 0.0, 100.0, 0.1);
 
-    // Container must be declare for interactive component
+    // Container for interactive components
     auto main_container = ftxui::Container::Vertical({
-        pauseButton,
+        ftxui::Container::Horizontal({
+            prev_button,
+            pause_button,
+            next_button,
+        }),
+        process_slider,
     });
 
-    // Who decided to make the entire UI lib pure functional T_T
+    process_slider->TakeFocus();
+
+    // Renderer
     auto renderer = ftxui::Renderer(main_container, [&]() -> ftxui::Element {
         double current_p = g_current_progress.load();
+        int current_track = g_current_track_index.load();
+
         std::stringstream ss;
         ss << std::fixed << std::setprecision(3) << current_p << "%";
         progress_display_text = ss.str();
 
-        ftxui::ButtonOption button_option;
-
-        if (g_audio_finished) {
-            buttonLable = "Finished";
-        } else if (g_paused) {
-            buttonLable = "Play ";
-        } else if (!g_paused) {
-            buttonLable = "Pause";
+        // Handle slider interaction
+        if (std::abs(ui_slider_value - current_p) > 0.5 &&
+            !g_audio_finished.load()) {
+            g_seek_position_percent = ui_slider_value;
+            g_seek_requested = true;
+        } else {
+            if (!g_seek_requested.load()) {
+                ui_slider_value = current_p;
+            }
         }
+
+        // Update button labels
+        if (g_audio_finished) {
+            button_label = "Finished";
+        } else if (g_paused) {
+            button_label = " |> ";
+        } else {
+            button_label = " || ";
+        }
+
+        // Current track info
+        std::string current_file = "No track";
+        if (current_track < g_playlist.size()) {
+            current_file = get_filename_from_path(g_playlist[current_track]);
+        }
+
+        std::string track_info = "Track " + std::to_string(current_track + 1) +
+                                 "/" + std::to_string(g_playlist.size());
 
         return ftxui::vbox({
                    ftxui::hbox({
-                       ftxui::text(audio_file_path) | ftxui::flex,
+                       ftxui::text("File: "),
+                       ftxui::text(current_file) | ftxui::flex |
+                           ftxui::color(ftxui::Color::Green),
                    }),
-                   ftxui::separator(),
                    ftxui::hbox({
-                       pauseButton->Render(),
-                       ftxui::separator(),
+                       ftxui::text(track_info) |
+                           ftxui::color(ftxui::Color::Blue),
                        ftxui::text("Progress: "),
-                       ftxui::text(progress_display_text) | ftxui::flex |
+                       ftxui::text(progress_display_text) | ftxui::xflex |
                            ftxui::align_right |
                            ftxui::color(ftxui::Color::Green),
                    }),
                    ftxui::separator(),
-                   ftxui::gauge(current_p / 100.0) |
-                       ftxui::color(ftxui::Color::Green),
+                   ftxui::hbox({
+                       process_slider->Render(),
+                   }),
                    ftxui::separator(),
+                   ftxui::hbox({
+                       prev_button->Render() | ftxui::center,
+                       ftxui::text(" "),
+                       pause_button->Render() | ftxui::center,
+                       ftxui::text(" "),
+                       next_button->Render() | ftxui::center,
+                   }) | ftxui::center,
+                   ftxui::separator(),
+                   ftxui::text("Controls: Space=Play/Pause, ←=Previous, "
+                               "→=Next, ↑↓=Seek") |
+                       ftxui::dim | ftxui::center,
                }) |
                ftxui::border;
     });
 
-    // TODO: Threading
-    std::thread audio_thread(audio_playback_thread_logic, audio_file_path);
+    // Keyboard
+    auto keyboard_handler =
+        ftxui::CatchEvent(renderer, [&](ftxui::Event event) -> bool {
+            if (event == ftxui::Event::Character(' ')) {
+                g_paused = !g_paused;
+                return true;
+            }
+            if (event == ftxui::Event::ArrowLeft) {
+                g_skip_prev = true;
+                return true;
+            }
+            if (event == ftxui::Event::ArrowRight) {
+                g_skip_next = true;
+                return true;
+            }
+            if (event == ftxui::Event::ArrowUp) {
+                ui_slider_value = std::min(100.0f, ui_slider_value + 5.0f);
+                g_seek_position_percent = ui_slider_value;
+                g_seek_requested = true;
+                return true;
+            }
+            if (event == ftxui::Event::ArrowDown) {
+                ui_slider_value = std::max(0.0f, ui_slider_value - 5.0f);
+                g_seek_position_percent = ui_slider_value;
+                g_seek_requested = true;
+                return true;
+            }
+            return false;
+        });
+
+    // Start threads 😵
+    std::thread audio_thread(audio_playback_thread_logic);
     std::thread ui_update_thread([&] {
         while (!g_quit_app) {
             screen.PostEvent(ftxui::Event::Custom);
@@ -188,18 +359,38 @@ int main(int argc, char* argv[]) {
         std::cout << "UI exit.\n";
     });
 
-    // TODO: Render
-    screen.Loop(renderer);
-
+    screen.Loop(keyboard_handler);
     g_quit_app = true;
 
-    // TODO: Join thread
+    // WTF is join threads anyway
     if (audio_thread.joinable()) {
         audio_thread.join();
     }
     if (ui_update_thread.joinable()) {
         ui_update_thread.join();
     }
+    std::cout << "Player finished.\n";
+}
 
-    std::cout << "It actually work???.\n";
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0]
+                  << " <audio_file1> [audio_file2] [...]\n";
+        return 1;
+    }
+
+    std::vector<std::string> playlist;
+    for (int i = 1; i < argc; ++i) {
+        playlist.push_back(argv[i]);
+    }
+
+    std::cout << "Playlist: " << playlist.size() << " tracks:\n";
+    for (size_t i = 0; i < playlist.size(); ++i) {
+        std::cout << "  " << (i + 1) << ". "
+                  << get_filename_from_path(playlist[i]) << "\n";
+    }
+    std::cout << "\n";
+
+    play_playlist(playlist);
+    return 0;
 }

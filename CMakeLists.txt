@@ -8,16 +8,14 @@ FetchContent_Declare(ftxui
 )
 FetchContent_MakeAvailable(ftxui)
 
-include_directories(
-    ${PROJECT_SOURCE_DIR}/cava
-)
 
 set(DCMAKE_EXPORT_COMPILE_COMMANDS=1)
-
+find_package(FFTW3 REQUIRED)
 add_executable(
     ${PROJECT_NAME}
     src/main.cpp
-    src/miniaudio.c
+    src/miniaudio/miniaudio.c
+    src/cava/cavacore.c
 )
 
 target_link_libraries(
@@ -25,6 +23,7 @@ target_link_libraries(
     PRIVATE ftxui::screen
     PRIVATE ftxui::dom
     PRIVATE ftxui::component
-    PRIVATE ${PROJECT_SOURCE_DIR}/cava/cavacore.c
+    PRIVATE
+        ${FFTW3_LIBRARIES}
 )
 
