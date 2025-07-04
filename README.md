@@ -15,5 +15,5 @@ cmake --build .
 mkdir .\build\
 cd .\build\
 cmake -DCMAKE_BUILD_TYPE=Release -G "Visual Studio 17 2022" ..
-cmake --build --config Release .
+cmake --build .
 ```
