@@ -6,8 +6,8 @@
 git clone --recursive https://github.com/VimHater/tui-music-player.git
 mkdir build/
 cd build/
-cmake -DCMAKE_BUILD_TYPE=Release ..
-cmake --build .
+cmake ..
+cmake --build --config Release .
 ```
 
 ## Generate sln
@@ -15,4 +15,5 @@ cmake --build .
 mkdir .\build\
 cd .\build\
 cmake .. -G "Visual Studio 17 2022"
+cmake --build --config Release .
 ```

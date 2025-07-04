@@ -1,5 +1,8 @@
+#include <pthread.h>
 #include <atomic>
 #include <chrono>
+#include <cstring>
+#include <filesystem>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/event.hpp>
 #include <ftxui/component/screen_interactive.hpp>
@@ -13,7 +16,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
 #include "miniaudio/miniaudio.h"
 
 // Global
@@ -289,8 +291,10 @@ void play_playlist(const std::vector<std::string>& playlist) {
                            ftxui::color(ftxui::Color::Blue),
                        ftxui::hbox({
                            ftxui::text("Progress: "),
-                           ftxui::text(progress_display_text) | ftxui::color(ftxui::Color::Green),
-                       }) | ftxui::align_right | ftxui::flex,
+                           ftxui::text(progress_display_text) |
+                               ftxui::color(ftxui::Color::Green),
+                       }) | ftxui::align_right |
+                           ftxui::flex,
                    }),
                    ftxui::separator(),
                    ftxui::hbox({
@@ -308,7 +312,8 @@ void play_playlist(const std::vector<std::string>& playlist) {
                    ftxui::text("Controls: Space:Play/Pause, ←:Previous, "
                                "→:Next, ↑↓ Seek") |
                        ftxui::dim | ftxui::center,
-               }) | ftxui::border;
+               }) |
+               ftxui::border;
     });
 
     // Keyboard
@@ -372,16 +377,49 @@ void play_playlist(const std::vector<std::string>& playlist) {
     std::cout << "Player finished.\n";
 }
 
+std::vector<std::string> parse_file(int argc, char** argv) {
+    std::vector<std::string> playlist;
+    for (int i = 2; i < argc; ++i) {
+        playlist.push_back(argv[i]);
+    }
+    return playlist;
+}
+
+std::vector<std::string> parse_folder(int argc, char** argv) {
+    std::vector<std::string> playlist;
+
+    return playlist;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0]
-                  << " <audio_file1> [audio_file2] [...]\n";
+                  << " {file/folder} [audio_file1] [audio_file2] [...]\n";
         return 1;
     }
 
+    std::string arg1(argv[1]);
+
+    if (arg1 != "link" && arg1 != "file") {
+        std::cerr << "Usage: " << argv[0]
+                  << " {file/folder} [audio_file1] [audio_file2] [...]\n";
+        return 1;
+    }
+
+    for (int i = 2; i < argc; i++) {
+        std::filesystem::path path(argv[i]);
+        if (!std::filesystem::is_regular_file(path)) {
+            std::cerr << argv[i] <<" is not a file\n"
+                      << "Usage: " << argv[0]
+                      << " {file/link} [audio_file1] [audio_file2] [...]\n";
+            return 1;
+        }
+    }
+
     std::vector<std::string> playlist;
-    for (int i = 1; i < argc; ++i) {
-        playlist.push_back(argv[i]);
+
+    if (arg1 == "file") {
+        playlist = parse_file(argc, argv);
     }
 
     std::cout << "Playlist: " << playlist.size() << " tracks:\n";
